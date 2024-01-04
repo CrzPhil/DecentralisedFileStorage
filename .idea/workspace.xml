@@ -4,9 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="eb19f685-c073-4a0e-b26c-a2951c05a226" name="Changes" comment="">
+    <list default="true" id="eb19f685-c073-4a0e-b26c-a2951c05a226" name="Changes" comment="Some cleanup">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/Node.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/Node.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/SharedData.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/SharedData.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -78,6 +78,19 @@
       <option name="presentableId" value="Default" />
       <updated>1703834164280</updated>
     </task>
+    <task id="LOCAL-00001" summary="Some cleanup">
+      <option name="closed" value="true" />
+      <created>1704393802952</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1704393802952</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="Some cleanup" />
+    <option name="LAST_COMMIT_MESSAGE" value="Some cleanup" />
   </component>
 </project>

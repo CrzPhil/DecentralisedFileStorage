@@ -1,6 +1,7 @@
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Formatter;
 import java.security.MessageDigest;
@@ -46,11 +47,30 @@ public class SharedData {
         return chunks;
     }
 
-    private byte[] assembleData(byte[][] data) {
-        byte[] assembled = new byte[this.slice_size*this.slice_count];
+    private byte[] assembleData(HashMap<Long, byte[]> data) {
+        // Data is mapped to the Node ID that sent it.
+        // This will likely change later on but for now it's intuitive.
 
-        for (int i=0; i<this.slice_count; ++i) {
+        // Technically if this has been distributed we will know both the slices and their size
+        // But if we assume the state is lost after restart and only the hash and ID order remains,
+        // then we cannot use these and need to infer the assembled size via the length of the data.
+//        byte[] assembled = new byte[this.slice_size*this.slice_count];
 
+        // Get size of data; equivalent of CHUNKSIZE
+        // Assuming all byte arrays are of the same length and not null
+        int data_size = data.isEmpty() ? 0 : data.values().iterator().next().length;
+
+        byte[] assembled = new byte[data.size() * data_size];
+        ByteBuffer buf = ByteBuffer.wrap(assembled);
+
+        for (long node_id : this.ordered_ids) {
+            byte[] chunk = data.get(node_id);
+            if (chunk != null) {
+                buf.put(chunk);
+            } else {
+                // TODO: Handle missing parts
+                System.out.println("Part missing. ID: " + node_id);
+            }
         }
 
         return assembled;
