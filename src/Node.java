@@ -35,7 +35,7 @@ public class Node {
                     case "STANDBY" -> {
                         try {
                             Message message = this.readMessage();
-                            this.sendMessage(Node.this.handleInstruction(message, CHUNKSIZE));
+                            this.sendMessage(Node.this.handleInstruction(message));
                         } catch (IOException i) {
                             System.out.println(i);
                             System.out.println("Killing connection");
@@ -51,12 +51,11 @@ public class Node {
 //                                System.out.println("Not a TAKE?");
 //                                killConnection();
 //                            }
-                            // TODO: assumes TAKE?, assumes 1 byte of data indicating size, no error handling
                             byte[] message_data = message.getDataBytes();
                             int incoming_chunks = message_data[0];
                             System.out.println(incoming_chunks + " chunks incoming");
 
-                            this.sendMessage(Node.this.handleInstruction(message, CHUNKSIZE));
+                            this.sendMessage(Node.this.handleInstruction(message));
 
                             // Read data
                             byte[] data = new byte[CHUNKSIZE*incoming_chunks];
@@ -72,7 +71,7 @@ public class Node {
                             // are we DONE! ?
                             message = this.readMessage();
                             // Send THANKS!
-                            this.sendMessage(Node.this.handleInstruction(message, CHUNKSIZE));
+                            this.sendMessage(Node.this.handleInstruction(message));
                         } catch (IOException i) {
                             System.out.println(i);
                             System.out.println("Killing connection");
@@ -200,15 +199,6 @@ public class Node {
             return chunks;
         }
 
-        private void sendInt(int value) throws IOException {
-            this.out.writeInt(value);
-        }
-
-        private int readInt() throws IOException {
-            int value = this.in.readInt();
-            return value;
-        }
-
         private void killConnection() {
             try {
                 this.peer_s.close();
@@ -228,15 +218,12 @@ public class Node {
     private final String ip;
     private final int port;
     // TODO: This is very costly, but we don't have a lot of mutations currently. Still, consider finding alt.
-    private CopyOnWriteArrayList<Node> peers;
+    private final CopyOnWriteArrayList<Node> peers;
     private Socket peer_s = null;
-    private ServerSocket server = null;
     private HashMap<String, SharedData> storage;
-    private HashMap<Long, Thread> peerThreadMap = new HashMap<>();
-    private HashMap<Long, PeerHandler> peerHandlerMap = new HashMap<>();
-    private ConcurrentMap<Long, byte[]> peerDataMap = new ConcurrentHashMap<>();
-    private PeerConnectionManager connectionManager;
-    private Thread connectionManagerThread;
+    private final HashMap<Long, Thread> peerThreadMap = new HashMap<>();
+    private final HashMap<Long, PeerHandler> peerHandlerMap = new HashMap<>();
+    private final ConcurrentMap<Long, byte[]> peerDataMap = new ConcurrentHashMap<>();
 
     public Node(String ip, int port) {
         Random rn = new Random();
@@ -269,10 +256,11 @@ public class Node {
         List<Node> blacklist = new ArrayList<>();
 
         // Start server socket
+        Thread connectionManagerThread;
         try {
-            this.connectionManager = new PeerConnectionManager(port, this);
-            this.connectionManagerThread = new Thread(this.connectionManager);
-            this.connectionManagerThread.start();
+            PeerConnectionManager connectionManager = new PeerConnectionManager(port, this);
+            connectionManagerThread = new Thread(connectionManager);
+            connectionManagerThread.start();
         } catch (IOException i) {
             System.out.println(i);
             System.out.println("Failed to start PeerConnectionManager.");
@@ -298,7 +286,7 @@ public class Node {
         // Stay alive until all threads are done
         long[] kill_list = new long[this.peerThreadMap.size()];
         int i = 0;
-        while (this.peerThreadMap.size() != 0) {
+        while (!this.peerThreadMap.isEmpty()) {
             for (long handler_id : this.peerThreadMap.keySet()) {
                 if (this.peerThreadMap.get(handler_id).isAlive()) {
                     continue;
@@ -323,7 +311,7 @@ public class Node {
         // Stop listener
 //        this.connectionManager.shutdown();
         try {
-            this.connectionManagerThread.join();
+            connectionManagerThread.join();
         } catch (InterruptedException j) {
             System.out.println(j);
             System.out.println("Failed to stop connectionManager");
@@ -427,7 +415,7 @@ public class Node {
         }
     }
 
-    public Message handleInstruction(Message message, int chunksize) {
+    public Message handleInstruction(Message message) {
         String value = message.getValue();
 
         Message response = null;
