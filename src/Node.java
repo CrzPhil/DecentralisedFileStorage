@@ -66,6 +66,8 @@ public class Node {
                                 buf.put(this.in.readNBytes(CHUNKSIZE));
                             }
 
+                            data = stripPadding(data);
+
                             Node.this.storeData(this.peer, data);
 
                             // are we DONE! ?
@@ -145,9 +147,137 @@ public class Node {
                     }
                     case "LOOKING" -> {
                         try {
-                            String instruction = Arrays.toString(this.in.readNBytes(CHUNKSIZE));
-                        } catch (IOException i) {
+                            // QERY?
+                            Message message = new Message("INSTRUCTION", "QERY?");
+                            this.sendMessage(message);
 
+                            Message response = this.readMessage();
+
+                            // We expect AFFIRM!
+                            if (!Node.this.handleResponse(response)) {
+                                this.killConnection();
+                                break;
+                            }
+
+                            // GIVE? <hash>
+                            // Problem is that the owner node does not store the hash of each slice
+                            // As a PoC we can still do it for one data "blob" per node, but eventually
+                            // we would have to keep a table of NodeID:slice_hash in order to request it
+                            SharedData shared = Node.this.getDistributedData();
+                            assert shared != null;
+
+                            message = new Message("INSTRUCTION", "GIVE?", shared.getHash());
+                            this.sendMessage(message);
+
+                            response = this.readMessage();
+
+                            // If peer doesn't have the hash (something we could have also computed locally)
+                            // REJECT! -> Peer will reset its state to STANDBY
+                            if (!Node.this.handleResponse(response)) {
+                                break;
+                            }
+
+                            // Wait for potential nested peer lookups
+
+                            // Wait for TAKE? <chunks>
+                            Message take = this.readMessage();
+
+                            byte[] message_data = take.getDataBytes();
+                            int incoming_chunks = message_data[0];
+                            System.out.println(incoming_chunks + " chunks incoming");
+
+                            this.sendMessage(Node.this.handleInstruction(take));
+
+                            // Read data
+                            byte[] data = new byte[CHUNKSIZE*incoming_chunks];
+                            ByteBuffer buf = ByteBuffer.wrap(data);
+
+                            for (int i=0; i<incoming_chunks; i++) {
+                                System.out.println("Reading chunk");
+                                buf.put(this.in.readNBytes(CHUNKSIZE));
+                            }
+
+                            // Get rid of padding
+                            data = stripPadding(data);
+                            shared.getSliceMap().put(this.peer.id, data);
+
+                            // DONE?
+                            Message done = new Message("INSTRUCTION", "DONE?");
+                            this.sendMessage(done);
+                            response = this.readMessage();
+
+                            // We expect THANKS!
+                            if (!Node.this.handleResponse(response)) {
+                                break;
+                            }
+                            Node.this.setState("STANDBY");
+                        } catch (IOException i) {
+                            System.out.println(i);
+                            System.out.println("Killing connection");
+                            killConnection();
+                            return;
+                        }
+                    }
+                    case "COLLECTING" -> {
+                        try {
+                            // Expect GIVE? <hash>
+                            Message message = this.readMessage();
+
+                            if (!message.getValue().equals("GIVE?")) {
+                                System.out.println("Expected GIVE?, got " + message.getValue());
+                                System.out.println("Killing connection.");
+                                killConnection();
+                                return;
+                            }
+
+                            String hash = message.getData();
+                            SharedData shared = Node.this.storage.get(hash);
+
+                            if (shared == null) {
+                                Message response = new Message("RESPONSE", "REJECT!");
+                                this.sendMessage(response);
+                                Node.this.setState("STANDBY");
+                                break;
+                            } else {
+                                Message response = new Message("RESPONSE", "ACCEPT!");
+                                this.sendMessage(response);
+                            }
+
+                            byte[] data;
+                            if (shared.isDistributed()) {
+                                // Perform (nested) lookup
+                                data = null;
+                            } else {
+                                data = shared.getData();
+                            }
+
+                            assert data != null;
+                            byte[][] chunks = chunkData(data);
+
+                            Message take = new Message("INSTRUCTION", "TAKE?", new byte[] {(byte) chunks.length});
+                            this.sendMessage(take);
+                            Message response = this.readMessage();
+
+                            // We expect ACCEPT!
+                            if (!Node.this.handleResponse(response)) {
+                                this.killConnection();
+                                break;
+                            }
+
+                            for (byte[] chunk : chunks) {
+                                System.out.println("Sending chunk ...");
+                                this.out.write(chunk, 0, CHUNKSIZE);
+                            }
+
+                            // are we DONE! ?
+                            message = this.readMessage();
+                            // Send THANKS!
+                            this.sendMessage(Node.this.handleInstruction(message));
+                        } catch (IOException i) {
+                            System.out.println(i);
+                            System.out.println("Killing connection");
+                            killConnection();
+                            return;
                         }
                     }
                     default -> {
@@ -211,7 +341,7 @@ public class Node {
     }
     private final int CHUNKSIZE = 64;
 
-    private final String[] STATES = {"STANDBY", "ACCEPTING", "DISTRIBUTING", "LOOKING"};
+    private final String[] STATES = {"STANDBY", "ACCEPTING", "DISTRIBUTING", "LOOKING", "COLLECTING"};
 
     private String state = STATES[0];
     private long id;
@@ -334,6 +464,15 @@ public class Node {
         return null;
     }
 
+    private SharedData getDistributedData() {
+        for (SharedData distributed : this.storage.values()) {
+            if (distributed.isDistributed()) {
+                return distributed;
+            }
+        }
+        return null;
+    }
+
     private void buildDistribution() {
         for (SharedData undistributed : this.storage.values()) {
             if (!undistributed.isDistributed()) {
@@ -360,6 +499,7 @@ public class Node {
         System.out.printf("Storing data from %s%n", peer);
         System.out.println(Arrays.toString(data));
         SharedData shared = new SharedData(this, peer, data);
+        System.out.println("Hash: " + shared.getHash());
         this.storage.put(shared.getHash(), shared);
     }
 
@@ -430,7 +570,7 @@ public class Node {
                 }
             }
             case "TAKE?" -> {
-                if (this.state.equals("ACCEPTING")) {
+                if (this.state.equals("ACCEPTING") || this.state.equals("LOOKING")) {
                     response = new Message("RESPONSE", "ACCEPT!");
                 } else {
                     response = new Message("RESPONSE", "REJECT!");
@@ -439,9 +579,15 @@ public class Node {
             case "GIVE?" -> {
             }
             case "QERY?" -> {
+                if (this.state.equals("STANDBY")) {
+                    this.setState("COLLECTING");
+                    response = new Message("RESPONSE", "AFFIRM!");
+                } else {
+                    response = new Message("RESPONSE", "NOOOPE!");
+                }
             }
             case "DONE?" -> {
-                if (this.state.equals("ACCEPTING")) {
+                if (this.state.equals("ACCEPTING") || this.state.equals("COLLECTING")) {
                     response = new Message("RESPONSE", "THANKS!");
                     this.state = "STANDBY";
                 } else {
@@ -477,10 +623,9 @@ public class Node {
                 this.state = "STANDBY";
             }
             case "ACCEPT!" -> {
-
             }
             case "REJECT!" -> {
-
+                all_good = false;
             }
             case "THANKS" -> {
                 if (this.state.equals("DISTRIBUTING")) {
@@ -534,5 +679,9 @@ public class Node {
 
     public void setState(String state) {
         this.state = state;
+    }
+
+    public HashMap<String, SharedData> getStorage() {
+        return storage;
     }
 }

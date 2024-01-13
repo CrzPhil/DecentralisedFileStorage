@@ -8,19 +8,20 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class SharedData {
     private String hash;
     private final ArrayList<Long> ordered_ids;
-
     private final Node parent;
     private final Node owner;
     private final int data_size;
     private final int slice_count;
     private final int slice_size;
     // TODO: does it make sense to actually keep data in memory? if not, where else to store it?
-    private final byte[] data;
+    private byte[] data;
     private boolean distributed;
+    private final ConcurrentHashMap<Long, byte[]> sliceMap = new ConcurrentHashMap<>();
 
     public SharedData(Node parent, Node owner, byte[] data) {
         this.hash = SHAsum(data);
@@ -39,6 +40,21 @@ public class SharedData {
         this.distributed = false;
     }
 
+    public SharedData(Node parent, Node owner, String hash) {
+        this.hash = hash;
+        this.parent = parent;
+        this.owner = owner;
+        this.data = null;
+
+        this.ordered_ids = new ArrayList<>();
+
+        this.data_size = 0;
+        this.slice_count = 0;
+        this.slice_size = 0;
+
+        this.distributed = true;
+    }
+
     public byte[][] split_data() {
         byte[][] chunks  = new byte[slice_count][slice_size];
         for (int i=0; i<slice_count; ++i) {
@@ -47,7 +63,7 @@ public class SharedData {
         return chunks;
     }
 
-    private byte[] assembleData(HashMap<Long, byte[]> data) {
+    private byte[] assembleData() {
         // Data is mapped to the Node ID that sent it.
         // This will likely change later on but for now it's intuitive.
 
@@ -58,13 +74,13 @@ public class SharedData {
 
         // Get size of data; equivalent of CHUNKSIZE
         // Assuming all byte arrays are of the same length and not null
-        int data_size = data.isEmpty() ? 0 : data.values().iterator().next().length;
+        int data_size = sliceMap.isEmpty() ? 0 : sliceMap.values().iterator().next().length;
 
-        byte[] assembled = new byte[data.size() * data_size];
+        byte[] assembled = new byte[sliceMap.size() * data_size];
         ByteBuffer buf = ByteBuffer.wrap(assembled);
 
         for (long node_id : this.ordered_ids) {
-            byte[] chunk = data.get(node_id);
+            byte[] chunk = sliceMap.get(node_id);
             if (chunk != null) {
                 buf.put(chunk);
             } else {
@@ -129,5 +145,17 @@ public class SharedData {
 
     public int getSlice_size() {
         return slice_size;
+    }
+
+    public byte[] getData() {
+        return data;
+    }
+
+    public void setData(byte[] data) {
+        this.data = data;
+    }
+
+    public ConcurrentHashMap<Long, byte[]> getSliceMap() {
+        return sliceMap;
     }
 }
